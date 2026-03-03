@@ -58,7 +58,15 @@ export default function UploadPage() {
                 const result = await res.json();
 
                 if (res.ok) {
-                    addLog(`✅ OK: ${result.message}`);
+                    addLog(`✅ IOFE: ${result.message}`);
+                    // Show Sheet registration status (matching Python output)
+                    if (result.sheet) {
+                        if (result.sheet.ok) {
+                            addLog(`✅ GSheets: ${result.sheet.message}`);
+                        } else {
+                            addLog(`⚠️ GSheets: ${result.sheet.message}`);
+                        }
+                    }
                     successCount++;
                 } else {
                     addLog(`❌ ERROR: ${result.error}`);

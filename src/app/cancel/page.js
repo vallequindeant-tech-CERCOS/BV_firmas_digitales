@@ -58,14 +58,17 @@ export default function CancelPage() {
         if (itemsToCancel.length === 0) return;
 
         setProcessing(true);
-        setLogs([]); // Clear previous logs
+        setLogs([]);
         addLog(`🚀 Iniciando anulación masiva de ${itemsToCancel.length} documentos...`);
-
-        // Process in chunks to avoid timeouts? Or just one big batch? 
-        // API route handles batching logic, but let's send all at once for now.
 
         try {
             const token = localStorage.getItem('iofe_token');
+            if (!token) {
+                addLog('❌ No hay token de sesión. Inicie sesión de nuevo.');
+                setProcessing(false);
+                return;
+            }
+
             const res = await fetch('/api/documents/cancel', {
                 method: 'POST',
                 headers: {
@@ -81,13 +84,15 @@ export default function CancelPage() {
                 result.details.forEach(det => {
                     if (det.status === 'success') {
                         addLog(`✅ ${det.subject}: Anulado correctamente`);
+                    } else if (det.status === 'warning') {
+                        addLog(`⚠️ ${det.subject}: ${det.message}`);
                     } else {
-                        addLog(`❌ ${det.subject}: Error - ${det.message}`);
+                        addLog(`❌ ${det.subject}: ${det.message}`);
                     }
                 });
                 addLog(`\n🏁 FINALIZADO. Éxitos: ${result.success}, Errores: ${result.errors}`);
             } else {
-                addLog(`❌ Error API: ${result.error}`);
+                addLog(`❌ ${result.error}`);
             }
 
         } catch (err) {

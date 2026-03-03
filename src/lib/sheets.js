@@ -8,21 +8,22 @@ const SCOPES = [
 
 function getAuth() {
     const email = process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL;
-    // Handle private key newlines correctly in Vercel/env vars
-    const privateKey = process.env.GOOGLE_PRIVATE_KEY
-        ? process.env.GOOGLE_PRIVATE_KEY.replace(/\\n/g, '\n')
-        : undefined;
+    // Next.js dotenv expands \n in double-quoted values to real newlines automatically.
+    // But if running in Vercel or other envs where \n is literal, we handle both cases.
+    let privateKey = process.env.GOOGLE_PRIVATE_KEY;
+    if (privateKey && privateKey.includes('\\n')) {
+        privateKey = privateKey.replace(/\\n/g, '\n');
+    }
 
     if (!email || !privateKey) {
         throw new Error("Missing Google Service Account credentials in environment variables");
     }
 
-    return new google.auth.JWT(
-        email,
-        null,
-        privateKey,
-        SCOPES
-    );
+    return new google.auth.JWT({
+        email: email,
+        key: privateKey,
+        scopes: SCOPES,
+    });
 }
 
 export async function getSheet() {
@@ -35,15 +36,25 @@ export async function getSheet() {
     return { sheets, spreadsheetId };
 }
 
-async function getSpreadsheetId(sheets, name) {
-    // Nota: En una app real, lo ideal es usar el ID fijo en env vars GOOGLE_SPREADSHEET_ID
-    // Para mantener compatibilidad con la lógica original, buscamos por nombre o usamos un ID fijo si se provee
+async function getSpreadsheetId(sheetsClient, name) {
+    // Si tenemos el ID fijo en env vars, usarlo directamente
     if (process.env.GOOGLE_SPREADSHEET_ID) return process.env.GOOGLE_SPREADSHEET_ID;
 
-    // Si no tenemos ID, asumimos que el usuario configurará el ID correcto eventualmente.
-    // Por ahora, lanzamos error si no está configurado, ya que buscar por nombre requiere Drive API
-    // y es menos eficiente/seguro.
-    throw new Error("GOOGLE_SPREADSHEET_ID not defined in environment variables");
+    // Fallback: buscar por nombre usando Google Drive API (igual que gspread.open(name) en Python)
+    const auth = getAuth();
+    const drive = google.drive({ version: 'v3', auth });
+
+    const res = await drive.files.list({
+        q: `name='${name}' and mimeType='application/vnd.google-apps.spreadsheet' and trashed=false`,
+        fields: 'files(id, name)',
+        spaces: 'drive',
+    });
+
+    if (!res.data.files || res.data.files.length === 0) {
+        throw new Error(`Spreadsheet '${name}' not found in Google Drive. Set GOOGLE_SPREADSHEET_ID in env vars or share the spreadsheet with the service account.`);
+    }
+
+    return res.data.files[0].id;
 }
 
 /**
@@ -91,12 +102,13 @@ export async function batchLookup(subjects) {
     if (!rows || rows.length === 0) return {};
 
     const headers = rows[0].map(h => h.trim());
-    const idxSubject = headers.findIndex(h => h.toLowerCase() === 'subject');
-    const idxId = headers.findIndex(h => h.toLowerCase() === 'iofe_id');
-    const idxWorkflow = headers.findIndex(h => h.toLowerCase() === 'workflowid'); // Adjust check if needed
+    // Match exact column names as used by the Python script
+    const idxSubject = headers.findIndex(h => h === 'Subject');
+    const idxId = headers.findIndex(h => h === 'IOFE_ID');
+    const idxWorkflow = headers.findIndex(h => h === 'workFlowID');
 
     if (idxSubject === -1 || idxId === -1) {
-        throw new Error("Sheet missing 'Subject' or 'IOFE_ID' columns");
+        throw new Error(`Sheet missing 'Subject' or 'IOFE_ID' columns. Found headers: ${headers.join(', ')}`);
     }
 
     const index = {};

@@ -24,18 +24,14 @@ export default function DownloadPage() {
                 const wb = XLSX.read(bstr, { type: 'binary' });
                 const wsname = wb.SheetNames[0];
                 const ws = wb.Sheets[wsname];
-                // Read first column essentially, or column "subject"
-                const data = XLSX.utils.sheet_to_json(ws, { header: 1 }); // Array of arrays
+                const data = XLSX.utils.sheet_to_json(ws, { header: 1 });
 
-                // Assume column 0 if header not found, or look for header
-                // Simple approach: look for 'subject' header or take first column
                 let colIndex = 0;
                 const headerRow = data[0];
                 const subjectIdx = headerRow.findIndex(c => String(c).toLowerCase().trim() === 'subject');
                 if (subjectIdx !== -1) colIndex = subjectIdx;
 
                 const subjects = [];
-                // Skip header if we found one
                 const startRow = (subjectIdx !== -1) ? 1 : 0;
 
                 for (let i = startRow; i < data.length; i++) {
@@ -84,6 +80,12 @@ export default function DownloadPage() {
 
         try {
             const token = localStorage.getItem('iofe_token');
+            if (!token) {
+                addLog('❌ No hay token de sesión. Inicie sesión de nuevo.');
+                setProcessing(false);
+                return;
+            }
+
             const res = await fetch('/api/documents/download', {
                 method: 'POST',
                 headers: {
@@ -96,28 +98,43 @@ export default function DownloadPage() {
             const result = await res.json();
 
             if (res.ok) {
-                addLog(`✅ Links encontrados: ${result.success}. Links fallidos: ${result.errors}`);
-
-                // Trigger downloads
-                // Note: Browsers block multiple downloads usually. Interactive delay might be needed or zip logic on server.
-                // For now, we attempt sequential download.
-                addLog("⬇️ Iniciando descargas en el navegador...");
-
-                let success = 0;
-                for (const doc of result.documents) {
-                    addLog(`Descargando: ${doc.filename}...`);
-                    // Use a small delay to be nice to the browser
-                    await new Promise(r => setTimeout(r, 500));
-
-                    const ok = await downloadFile(doc.url, doc.filename);
-                    if (ok) success++;
-                    else addLog(`❌ Falló descarga de: ${doc.filename}`);
+                // Show per-document results
+                if (result.details) {
+                    for (const det of result.details) {
+                        if (det.status === 'success') {
+                            addLog(`✅ ${det.subject}: Link obtenido`);
+                        } else {
+                            addLog(`❌ ${det.subject}: ${det.message}`);
+                        }
+                    }
                 }
 
-                addLog(`\n🏁 FINALIZADO. Descargados: ${success}`);
+                addLog(`\n📊 Resumen: ${result.success} encontrados, ${result.errors} errores`);
+
+                if (result.documents && result.documents.length > 0) {
+                    addLog("\n⬇️ Iniciando descargas en el navegador...");
+
+                    let success = 0;
+                    for (const doc of result.documents) {
+                        addLog(`Descargando: ${doc.filename}...`);
+                        await new Promise(r => setTimeout(r, 500));
+
+                        const ok = await downloadFile(doc.url, doc.filename);
+                        if (ok) {
+                            addLog(`✅ Descargado: ${doc.filename}`);
+                            success++;
+                        } else {
+                            addLog(`❌ Falló la descarga de: ${doc.filename}`);
+                        }
+                    }
+
+                    addLog(`\n🏁 FINALIZADO. Descargados: ${success} de ${result.documents.length}`);
+                } else {
+                    addLog('\n⚠️ No se encontraron documentos para descargar.');
+                }
 
             } else {
-                addLog(`❌ Error API: ${result.error}`);
+                addLog(`❌ ${result.error}`);
             }
 
         } catch (err) {
